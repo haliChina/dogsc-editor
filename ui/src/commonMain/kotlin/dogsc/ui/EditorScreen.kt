@@ -145,9 +145,12 @@ fun EditorScreen(
         ZoomMath.scaleAt(it.zoomSegments(), (playheadMs - it.timelineStartMs).coerceAtLeast(0))
     } ?: 1f
 
-    // Schematic playback: advances the playhead so zoom/presentation animate.
-    LaunchedEffect(isPlaying) {
+    // Playhead driver for cases the platform preview does not drive itself:
+    // desktop schematic playback, and gaps between clips on Android.
+    val hasPreview = platformHasVideoPreview()
+    LaunchedEffect(isPlaying, activeClip?.id, hasPreview) {
         if (!isPlaying) return@LaunchedEffect
+        if (hasPreview && activeClip != null) return@LaunchedEffect
         var last = -1L
         while (true) {
             withFrameNanos { now ->
@@ -221,33 +224,38 @@ fun EditorScreen(
                 .border(1.dp, DogscPalette.Line, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            val pres = activeClip?.presentation()
             val bgColor = (project.canvas.background as? BackgroundSpec.SolidColor)?.argb ?: 0xFF101014
-            Canvas(Modifier.fillMaxSize().padding(6.dp)) {
-                drawRect(Color(bgColor))
-                if (activeClip != null) {
-                    val padRatio = (pres?.paddingPx ?: 0).toFloat() / project.canvas.width
-                    val padX = size.width * padRatio
-                    val padY = size.height * padRatio
-                    val innerW = size.width - padX * 2
-                    val innerH = size.height - padY * 2
-                    val zw = innerW / zoomScale
-                    val zh = innerH / zoomScale
-                    drawRoundRect(
-                        color = DogscPalette.ClipBlue,
-                        topLeft = Offset(padX + (innerW - zw) / 2, padY + (innerH - zh) / 2),
-                        size = Size(zw, zh),
-                        cornerRadius = CornerRadius((pres?.cornerRadiusPx ?: 0).toFloat()),
-                    )
-                    drawRoundRect(
-                        color = Color.White.copy(alpha = 0.65f),
-                        topLeft = Offset(padX, padY),
-                        size = Size(innerW, innerH),
-                        cornerRadius = CornerRadius((pres?.cornerRadiusPx ?: 0).toFloat()),
-                        style = Stroke(width = 1.5f),
-                    )
-                }
-            }
+            val activeAsset = activeClip?.let { project.asset(it.assetId) }
+            StagePreview(
+                assetUri = activeAsset?.uri,
+                sourceStartMs = activeClip?.sourceStartMs ?: 0,
+                sourceDurationMs = activeClip?.sourceDurationMs ?: 0,
+                speed = activeClip?.speed ?: 1.0,
+                volume = activeClip?.volume ?: 1f,
+                playheadLocalMs = activeClip?.let {
+                    (playheadMs - it.timelineStartMs).coerceAtLeast(0)
+                } ?: 0,
+                isPlaying = isPlaying,
+                zoomScale = zoomScale,
+                presentation = activeClip?.presentation(),
+                canvasWidth = project.canvas.width,
+                canvasHeight = project.canvas.height,
+                backgroundArgb = bgColor,
+                onPlayheadChange = { local ->
+                    activeClip?.let { playheadMs = it.timelineStartMs + local }
+                },
+                onEnded = {
+                    val next = videoTrack?.clips
+                        ?.filter { it.timelineStartMs >= (activeClip?.timelineEndMs ?: Long.MAX_VALUE) }
+                        ?.minByOrNull { it.timelineStartMs }
+                    if (next != null) {
+                        playheadMs = next.timelineStartMs
+                    } else {
+                        isPlaying = false
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     activeClip?.let { "片段 ${it.id}" } ?: "还没有片段",

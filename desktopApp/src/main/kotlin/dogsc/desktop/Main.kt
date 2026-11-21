@@ -19,6 +19,39 @@ import dogsc.ui.EditorScreen
 import java.io.File
 import javax.swing.JFileChooser
 
+private data class ProbeMeta(val durationMs: Long, val width: Int, val height: Int)
+
+/** Real metadata via ffprobe; falls back to a 60s placeholder when unavailable. */
+private fun probeWithFfprobe(file: File): ProbeMeta {
+    return try {
+        val proc = ProcessBuilder(
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-show_entries", "format=duration",
+            "-of", "csv=p=0",
+            file.absolutePath,
+        ).redirectErrorStream(true).start()
+        val out = proc.inputStream.bufferedReader().readText()
+        proc.waitFor()
+        var width = 0
+        var height = 0
+        var durationMs = 60_000L
+        for (line in out.lines()) {
+            val parts = line.split(",").map { it.trim() }
+            if (parts.size == 2 && parts[0].toIntOrNull() != null && parts[1].toIntOrNull() != null) {
+                width = parts[0].toInt()
+                height = parts[1].toInt()
+            } else if (parts.size == 1) {
+                parts[0].toDoubleOrNull()?.let { durationMs = (it * 1000).toLong() }
+            }
+        }
+        ProbeMeta(durationMs, width, height)
+    } catch (e: Exception) {
+        ProbeMeta(60_000, 0, 0)
+    }
+}
+
 /**
  * Windows desktop shell (Compose Desktop / JVM; packages to MSI/EXE).
  * Export is real on this platform: compile the project to an FFmpeg graph and run it.
@@ -58,14 +91,15 @@ fun main(args: Array<String>) {
                         }
                         if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
                             val file = chooser.selectedFile
-                            // Duration probing via ffprobe lands with the desktop
-                            // preview work; the scaffold uses a placeholder duration.
+                            val meta = probeWithFfprobe(file)
                             val now = System.currentTimeMillis()
                             val asset = AssetRef(
                                 id = "a$now",
                                 uri = file.absolutePath,
                                 kind = AssetKind.VIDEO,
-                                durationMs = 60_000,
+                                durationMs = meta.durationMs,
+                                width = meta.width,
+                                height = meta.height,
                             )
                             val start = Timeline.durationMs(engine.project)
                             engine.apply(Op.AddAsset(asset))
@@ -76,7 +110,7 @@ fun main(args: Array<String>) {
                                         id = "c$now",
                                         assetId = asset.id,
                                         timelineStartMs = start,
-                                        durationMs = 60_000,
+                                        durationMs = meta.durationMs.coerceAtLeast(1),
                                     ),
                                 )
                             )

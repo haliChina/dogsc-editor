@@ -29,8 +29,8 @@ import dogsc.ui.EditorScreen
  * Project snapshot into the screen, which kept its own engine - imports then
  * never appeared. Import now applies AddAsset/AddClip ops to this engine.
  *
- * Export is not wired yet on Android (Media3 Transformer lands behind the
- * same button; the project format and FFmpeg graph are shared with desktop).
+ * Preview is a real Media3 player (see :ui StagePreview); export runs through
+ * AndroidExporter (Media3 Transformer) into Movies/DogSC Editor.
  */
 class MainActivity : ComponentActivity() {
 
@@ -93,11 +93,11 @@ class MainActivity : ComponentActivity() {
                 EditorScreen(
                     engine = engine,
                     onImport = { picker.launch(arrayOf("video/*")) },
-                    onExport = {
-                        Toast.makeText(
-                            this, "安卓导出后端（Media3）尚未接通；工程格式与桌面端通用",
-                            Toast.LENGTH_LONG,
-                        ).show()
+                    onExport = { project ->
+                        Toast.makeText(this, "开始导出…", Toast.LENGTH_SHORT).show()
+                        AndroidExporter.export(this, project) { ok, message ->
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                        }
                     },
                 )
             }

@@ -21,6 +21,10 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.ui)
         }
+        androidMain.dependencies {
+            implementation(libs.media3.exoplayer)
+            implementation(libs.media3.ui)
+        }
     }
 }
 
