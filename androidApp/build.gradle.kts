@@ -11,12 +11,31 @@ android {
         applicationId = "io.github.halichina.dogsc"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+    // Fixed signing key: CI decodes DOGSC_KEYSTORE_BASE64 into the path given by
+    // DOGSC_KEYSTORE_PATH, so every build shares one certificate and updates can
+    // install over the previous build. Without it (plain local dev), the default
+    // debug key is used.
+    val dogscKeystore = System.getenv("DOGSC_KEYSTORE_PATH")
+    signingConfigs {
+        if (dogscKeystore != null) {
+            create("fixed") {
+                storeFile = file(dogscKeystore)
+                storePassword = System.getenv("DOGSC_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("DOGSC_KEY_ALIAS")
+                keyPassword = System.getenv("DOGSC_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
+        debug {
+            if (dogscKeystore != null) signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = false
+            if (dogscKeystore != null) signingConfig = signingConfigs.getByName("fixed")
         }
     }
     buildFeatures { compose = true }

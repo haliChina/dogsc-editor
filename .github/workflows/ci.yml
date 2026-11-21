@@ -40,8 +40,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Decode fixed signing keystore
+        env:
+          DOGSC_KEYSTORE_BASE64: ${{ secrets.DOGSC_KEYSTORE_BASE64 }}
+        run: echo "$DOGSC_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dogsc.keystore"
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble Android debug APK
+        env:
+          DOGSC_KEYSTORE_PATH: ${{ runner.temp }}/dogsc.keystore
+          DOGSC_KEYSTORE_PASSWORD: ${{ secrets.DOGSC_KEYSTORE_PASSWORD }}
+          DOGSC_KEY_ALIAS: ${{ secrets.DOGSC_KEY_ALIAS }}
+          DOGSC_KEY_PASSWORD: ${{ secrets.DOGSC_KEY_PASSWORD }}
         run: ./gradlew :androidApp:assembleDebug --console=plain
       - name: Upload APK
         uses: actions/upload-artifact@v4
