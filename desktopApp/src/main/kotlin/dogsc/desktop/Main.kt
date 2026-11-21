@@ -1,17 +1,20 @@
 package dogsc.desktop
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import dogsc.core.AgentTools
+import dogsc.core.AssetKind
+import dogsc.core.AssetRef
+import dogsc.core.Clip
+import dogsc.core.EditorEngine
 import dogsc.core.FfmpegCompiler
+import dogsc.core.Op
 import dogsc.core.Project
+import dogsc.core.Timeline
 import dogsc.core.Track
 import dogsc.core.TrackKind
+import dogsc.ui.DogscTheme
 import dogsc.ui.EditorScreen
 import java.io.File
 import javax.swing.JFileChooser
@@ -19,11 +22,11 @@ import javax.swing.JFileChooser
 /**
  * Windows desktop shell (Compose Desktop / JVM; packages to MSI/EXE).
  * Export is real on this platform: compile the project to an FFmpeg graph and run it.
+ * The engine lives here and is shared with the screen - same rule as Android.
  */
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "export-cli") {
         // Headless export: dogsc export-cli <project.json> <output.mp4>
-        // Asset URIs in the project file are used as paths.
         val projectFile = File(args[1])
         val project = AgentTools.projectFromJson(projectFile.readText())
         val paths = project.assets.associate { it.id to it.uri }
@@ -35,9 +38,9 @@ fun main(args: Array<String>) {
     }
     application {
         Window(onCloseRequest = ::exitApplication, title = "DogSC Editor") {
-            MaterialTheme {
-                var project by remember {
-                    mutableStateOf(
+            DogscTheme {
+                val engine = remember {
+                    EditorEngine(
                         Project(
                             id = "desktop-project",
                             name = "未命名工程",
@@ -46,7 +49,7 @@ fun main(args: Array<String>) {
                     )
                 }
                 EditorScreen(
-                    initialProject = project,
+                    engine = engine,
                     onImport = {
                         val chooser = JFileChooser().apply {
                             fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
@@ -55,26 +58,27 @@ fun main(args: Array<String>) {
                         }
                         if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
                             val file = chooser.selectedFile
-                            // Duration probing on desktop goes through ffprobe in the full
-                            // implementation; the scaffold registers the asset with a
-                            // placeholder duration the user can trim against the preview.
-                            val asset = dogsc.core.AssetRef(
-                                id = "a${System.currentTimeMillis()}",
+                            // Duration probing via ffprobe lands with the desktop
+                            // preview work; the scaffold uses a placeholder duration.
+                            val now = System.currentTimeMillis()
+                            val asset = AssetRef(
+                                id = "a$now",
                                 uri = file.absolutePath,
-                                kind = dogsc.core.AssetKind.VIDEO,
+                                kind = AssetKind.VIDEO,
                                 durationMs = 60_000,
                             )
-                            val clip = dogsc.core.Clip(
-                                id = "c${System.currentTimeMillis()}",
-                                assetId = asset.id,
-                                timelineStartMs = 0,
-                                durationMs = 60_000,
-                            )
-                            project = project.copy(
-                                assets = project.assets + asset,
-                                tracks = project.tracks.map {
-                                    if (it.id == "t1") it.copy(clips = it.clips + clip) else it
-                                },
+                            val start = Timeline.durationMs(engine.project)
+                            engine.apply(Op.AddAsset(asset))
+                            engine.apply(
+                                Op.AddClip(
+                                    "t1",
+                                    Clip(
+                                        id = "c$now",
+                                        assetId = asset.id,
+                                        timelineStartMs = start,
+                                        durationMs = 60_000,
+                                    ),
+                                )
                             )
                         }
                     },

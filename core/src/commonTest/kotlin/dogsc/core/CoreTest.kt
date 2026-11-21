@@ -136,3 +136,80 @@ class CoreTest {
         assertTrue(result.command.filterComplex.contains("concat=n=2:v=1:a=0"), result.command.filterComplex)
     }
 }
+
+class PlannerTest {
+
+    private fun sampleProject(): Project {
+        val asset = AssetRef("a1", "/tmp/screen.mp4", AssetKind.VIDEO, durationMs = 60_000, width = 1920, height = 1080)
+        val clip = Clip("c1", "a1", timelineStartMs = 0, sourceStartMs = 0, durationMs = 20_000)
+        return Project(
+            id = "p1", name = "demo",
+            assets = listOf(asset),
+            tracks = listOf(Track("t1", TrackKind.VIDEO, listOf(clip))),
+        )
+    }
+
+    @Test
+    fun plannerParsesSplitAtSeconds() {
+        val action = LocalAgentPlanner.plan(sampleProject(), "在 5 秒分割", playheadMs = 0)
+        assertTrue(action is AgentAction.Apply)
+        val op = (action as AgentAction.Apply).ops.single()
+        assertTrue(op is Op.SplitClip)
+        assertEquals(5_000, (op as Op.SplitClip).atTimelineMs)
+    }
+
+    @Test
+    fun plannerParsesZoomSpeedVolumeCanvas() {
+        val p = sampleProject()
+        val zoom = LocalAgentPlanner.plan(p, "加缩放 2 倍", playheadMs = 3_000)
+        assertTrue(zoom is AgentAction.Apply)
+        val zop = (zoom as AgentAction.Apply).ops.single()
+        assertTrue(zop is Op.AddZoomSegment)
+        assertEquals(2.0f, (zop as Op.AddZoomSegment).segment.scale)
+        assertEquals(3_000, zop.segment.startMs)
+
+        val speed = LocalAgentPlanner.plan(p, "变速 2 倍", playheadMs = 0)
+        assertTrue((speed as AgentAction.Apply).ops.single() is Op.SetSpeed)
+
+        val vol = LocalAgentPlanner.plan(p, "音量 50%", playheadMs = 0)
+        val vop = (vol as AgentAction.Apply).ops.single()
+        assertTrue(vop is Op.SetVolume)
+        assertEquals(0.5f, (vop as Op.SetVolume).volume)
+
+        val canvas = LocalAgentPlanner.plan(p, "画布竖屏", playheadMs = 0)
+        val cop = (canvas as AgentAction.Apply).ops.single()
+        assertTrue(cop is Op.UpdateCanvas)
+        assertEquals(1080, (cop as Op.UpdateCanvas).canvas.width)
+        assertEquals(1920, cop.canvas.height)
+
+        // 演示画布 must hit SetPresentation, not the canvas-size branch.
+        val pres = LocalAgentPlanner.plan(p, "演示画布", playheadMs = 0)
+        assertTrue((pres as AgentAction.Apply).ops.single() is Op.SetPresentation)
+    }
+
+    @Test
+    fun plannerUndoAndUnknownAndEndToEnd() {
+        val p = sampleProject()
+        assertTrue(LocalAgentPlanner.plan(p, "撤销", 0) is AgentAction.Undo)
+        assertTrue(LocalAgentPlanner.plan(p, "今天天气怎么样", 0) is AgentAction.Unknown)
+
+        // A planned action applies cleanly through the engine.
+        val engine = EditorEngine(p)
+        val action = LocalAgentPlanner.plan(p, "在 5 秒分割", playheadMs = 0) as AgentAction.Apply
+        action.ops.forEach { engine.apply(it) }
+        assertEquals(2, engine.project.track("t1")!!.clips.size)
+    }
+
+    @Test
+    fun engineNotifiesListeners() {
+        val engine = EditorEngine(sampleProject())
+        var fired = 0
+        val listener: () -> Unit = { fired++ }
+        engine.addListener(listener)
+        engine.apply(Op.SetVolume("t1", "c1", 0.5f))
+        engine.undo()
+        engine.removeListener(listener)
+        engine.redo()
+        assertEquals(2, fired)
+    }
+}

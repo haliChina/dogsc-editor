@@ -265,12 +265,19 @@ class EditorEngine(initial: Project) {
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
 
+    // Shells and UI observe every mutation (button ops, imports, agent ops) through this.
+    private val listeners = mutableListOf<() -> Unit>()
+    fun addListener(listener: () -> Unit) { listeners += listener }
+    fun removeListener(listener: () -> Unit) { listeners -= listener }
+    private fun notifyChanged() { listeners.toList().forEach { it() } }
+
     fun apply(op: Op): Op {
         val before = project
         val (next, inverse) = ProjectOps.apply(before, op)
         project = next
         undoStack.addLast(Entry(op, inverse, before))
         redoStack.clear()
+        notifyChanged()
         return inverse
     }
 
@@ -278,6 +285,7 @@ class EditorEngine(initial: Project) {
         val entry = undoStack.removeLastOrNull() ?: return false
         project = entry.before
         redoStack.addLast(entry)
+        notifyChanged()
         return true
     }
 
@@ -286,6 +294,7 @@ class EditorEngine(initial: Project) {
         val (next, _) = ProjectOps.apply(project, entry.op)
         project = next
         undoStack.addLast(entry)
+        notifyChanged()
         return true
     }
 }
